@@ -7,11 +7,84 @@ import h5py
 import os
 import numpy as np
 import random
-import gc
+import gc, time
 import torch
 import torch.utils.data as data
 
 import multiprocessing
+
+INFO_FILE = 'data/info.json'
+DICT_FILE = 'data/dict.txt'
+LABEL_H5_FILE = 'data/img_label.h5'
+IMG_ATT_H5_FILE = 'data/ai_challenger_resnet152_att.h5'
+IMG_FC_H5_FILE = 'data/ai_challenger_resnet152_fc.h5'
+
+class MyDataset(data.Dataset):
+    def __init__(self, split):
+        infos = json.load(open(INFO_FILE, 'r'))
+        self.info = []
+        for info_item in infos:
+            if info_item['split'] == split:
+                self.info.append(info_item)
+
+        self.labels = h5py.File(LABEL_H5_FILE, 'r', driver='core')['labels']
+        self.att = h5py.File(IMG_ATT_H5_FILE, 'r')['att']
+        self.fc = h5py.File(IMG_FC_H5_FILE, 'r')['fc']
+        self.split = split
+
+        with open('data/dict.txt', 'r') as f:
+            lines = [x.strip() for x in f.readlines()]
+        #print(lines[:5])
+        self.itow = {i+1 : w for i, w in enumerate(lines)}
+        self.itow[0] = ''
+        self.vocab_size = len(self.itow)
+        self.seq_length = self.labels.shape[1]
+
+        #self.tr = transforms.Compose([transforms.ToTensor(),
+        #    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+
+    def __getitem__(self, index):
+        start = time.time()
+        #print('index:', index)
+        caption_id = self.info[index]['caption_id']
+        img_index = self.info[index]['image_index']
+        #print('img_idnex:', img_index)
+        att = self.att[img_index, :, :, :].astype(np.float32)
+        fc = self.fc[img_index, :].astype(np.float32)
+        label = self.labels[caption_id].astype(np.long)
+        mask = np.vectorize(lambda x: x > 0)(label).astype(np.float32)
+        #print(att.dtype, att.shape)
+        #print(fc.dtype, fc.shape)
+        #print(label.dtype, label.shape)
+        start2 = time.time()
+        gc.collect()
+        end = time.time()
+        print('read time: {:.3f}, gc time: {:.3f}'.format(end-start, end-start2))
+        return att, fc, label, mask
+
+    def __len__(self):
+        return len(self.info)
+
+def get_data_loader(split, shuffle=False, batch_size=16):
+    dset = MyDataset(split)
+    dloader = torch.utils.data.DataLoader(dset,  batch_size=batch_size, shuffle=shuffle, num_workers=8)
+    dloader.vocab_size = dset.vocab_size
+    dloader.seq_length = dset.seq_length
+    dloader.N = len(dset.info)
+    return dloader
+
+def check_data_set():
+    dloader = get_data_loader('train')
+
+    for i, data in enumerate(dloader):
+        att, fc, label, mask = data
+        if i > 10:
+            exit()
+        print(att.shape, fc.shape, label.shape, mask.shape)
+        print(label[0])
+        print(mask[0])
+
+#check_data_set()
 
 def get_npy_data(ix, fc_file, att_file, use_att):
     if use_att == True:
@@ -31,7 +104,7 @@ class DataLoader():
         return self.vocab_size
 
     def get_vocab(self):
-        vocabulary = self.ix_to_word # self.ex_vocab['rt_topdown_vocab'] if self.exchange_vocab else self.ix_to_word
+        vocabulary = self.ex_vocab['rt_topdown_vocab'] if self.exchange_vocab else self.ix_to_word
         return vocabulary
 
     def get_seq_length(self):
@@ -91,16 +164,16 @@ class DataLoader():
 
     def get_batch(self, split, batch_size=None, seq_per_img=None):
         split_ix = self.split_ix[split]
-        #print('split:', split)
+        print('split:', split)
         
-        #print('batch size:{}, {}'.format(batch_size, self.batch_size))
+        print('batch size:{}, {}'.format(batch_size, self.batch_size))
         batch_size = batch_size or self.batch_size
         seq_per_img = seq_per_img or self.seq_per_img
-        #print('batch size:{}, {}'.format(batch_size, self.batch_size))
+        print('batch size:{}, {}'.format(batch_size, self.batch_size))
         fc_batch = np.ndarray((batch_size, self.fc_feat_size), dtype = 'float32') if self.pre_ft else None
         att_batch = np.ndarray((batch_size, 14, 14, self.att_feat_size), dtype = 'float32') if self.pre_ft and self.att_im else None
-        label_batch = np.zeros([batch_size, self.seq_length + 2], dtype = 'int')
-        mask_batch = np.zeros([batch_size, self.seq_length + 2], dtype = 'float32')
+        label_batch = np.zeros([batch_size * self.seq_per_img, self.seq_length + 2], dtype = 'int')
+        mask_batch = np.zeros([batch_size * self.seq_per_img, self.seq_length + 2], dtype = 'float32')
 
 
         max_index = len(split_ix)
@@ -122,7 +195,7 @@ class DataLoader():
             ix = split_ix[ri]
 
             # fetch image
-            #print('ix:', ix)
+            print('ix:', ix)
             fc_batch[i] = self.h5_fc_file['fc'][ix, :]
             att_batch[i] = self.h5_att_file['att'][ix, :, :, :]
 
@@ -132,19 +205,18 @@ class DataLoader():
             ncap = ix2 - ix1 + 1 # number of captions available for this image
             assert ncap > 0, 'an image does not have any label. this can be handled but right now isn\'t'
 
-            #if ncap < self.seq_per_img:
+            if ncap < self.seq_per_img:
                 # we need to subsample (with replacement)
-            #    seq = np.zeros([self.seq_per_img, self.seq_length], dtype = 'int')
-            #    for q in range(self.seq_per_img):
-            #        ixl = random.randint(ix1,ix2)
-            #        seq[q, :] = self.h5_label_file['labels'][ixl, :self.seq_length]
+                seq = np.zeros([self.seq_per_img, self.seq_length], dtype = 'int')
+                for q in range(self.seq_per_img):
+                    ixl = random.randint(ix1,ix2)
+                    seq[q, :] = self.h5_label_file['labels'][ixl, :self.seq_length]
 
-            #else:
-            #    ixl = random.randint(ix1, ix2 - self.seq_per_img + 1)
-            #    seq = self.h5_label_file['labels'][ixl: ixl + self.seq_per_img, :self.seq_length]
+            else:
+                ixl = random.randint(ix1, ix2 - self.seq_per_img + 1)
+                seq = self.h5_label_file['labels'][ixl: ixl + self.seq_per_img, :self.seq_length]
 
-            #label_batch[i * self.seq_per_img : (i + 1) * self.seq_per_img, 1 : self.seq_length + 1] = seq
-            label_batch[i, 1:self.seq_length + 1] = self.h5_label_file['labels'][random.randint(ix1, ix2)]
+            label_batch[i * self.seq_per_img : (i + 1) * self.seq_per_img, 1 : self.seq_length + 1] = seq
 
             # Used for reward evaluation
             gts_labels = self.h5_label_file['labels'][self.label_start_ix[ix] - 1: self.label_end_ix[ix]]
@@ -159,10 +231,10 @@ class DataLoader():
 
         # generate mask
         t_start = time.time()
-        #print("label batch:", label_batch.shape)
-        #print(label_batch[:2])
+        print("label batch:", label_batch.shape)
+        print(label_batch[:2])
         nonzeros = np.array([y for y in map(lambda x: (x != 0).sum()+2, label_batch)])
-        #print("nozeros:", nonzeros.shape)
+        print("nozeros:", nonzeros.shape)
         for ix, row in enumerate(mask_batch):
             row[:nonzeros[ix]] = 1
 

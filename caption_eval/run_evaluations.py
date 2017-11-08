@@ -19,6 +19,7 @@
 
 import sys
 import argparse
+import traceback
 
 def compute_m1(json_predictions_file, reference_file):
     reload(sys)
@@ -38,8 +39,11 @@ def compute_m1(json_predictions_file, reference_file):
 
         # evaluate results
         coco_eval.evaluate()
-    except Exception:
+    except Exception, e:
         m1_score['error'] = 1
+        print repr(e)
+        print 'e.message:\t', e.message
+        print 'traceback.format_exc():\n%s' % traceback.format_exc()
     else:
         # print output evaluation scores
         for metric, score in coco_eval.eval.items():

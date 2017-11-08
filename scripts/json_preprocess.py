@@ -18,20 +18,21 @@ def convert2coco(caption_json, img_dir):
     coco[u'licenses'] = ['Unknown', 'Unknown']
     coco[u'images'] = list()
     coco[u'annotations'] = list()
+    coco[u'type'] = u'captions'
 
     for ind, sample in enumerate(dataset):
-        img = Image.open(os.path.join(imgdir, sample['image_id']))
-        width, height = img.size
+        #img = Image.open(os.path.join(imgdir, sample['image_id']))
+        width, height = 224, 224
 
         coco_img = {}
         coco_img[u'license'] = 0
-        coco_img[u'file_name'] = os.path.split(img_dir)[-1]+'/'+sample['image_id']
+        coco_img[u'file_name'] = sample['image_id']
         coco_img[u'width'] = width
         coco_img[u'height'] = height
         coco_img[u'date_captured'] = 0
         coco_img[u'coco_url'] = sample['url']
         coco_img[u'flickr_url'] = sample['url']
-        coco_img['id'] = os.path.splitext(os.path.basename(sample['image_id']))[0]
+        coco_img['id'] = sample['image_id'].split('.')[0]
 
         coco_anno = {}
         coco_anno[u'image_id'] = os.path.splitext(os.path.basename(sample['image_id']))[0]
@@ -43,12 +44,12 @@ def convert2coco(caption_json, img_dir):
 
         print('{}/{}'.format(ind, len(dataset)))
 
-    output_file = os.path.join(os.path.dirname(caption_json), 'coco_'+os.path.basename(caption_json))
+    output_file = 'data/coco_train_224.json'
     with open(output_file, 'w') as fid:
-        json.dump(coco, fid)
+        json.dump(coco, fid, ensure_ascii=False, indent=4)
     print('Saved to {}'.format(output_file))
 
-def convert2coco_val(caption_json, img_dir):
+def convert2coco_val(caption_json, img_dir, cap_index):
     dataset = json.load(open(caption_json, 'r'))
     imgdir = img_dir
 
@@ -57,10 +58,11 @@ def convert2coco_val(caption_json, img_dir):
     coco[u'licenses'] = ['Unknown', 'Unknown']
     coco[u'images'] = list()
     coco[u'annotations'] = list()
+    coco[u'type'] = u'captions'
 
     for ind, sample in enumerate(dataset):
-        img = Image.open(os.path.join(imgdir, sample['image_id']))
-        width, height = img.size
+        #img = Image.open(os.path.join(imgdir, sample['image_id']))
+        width, height = 224,224
 
         coco_img = {}
         coco_img[u'license'] = 0
@@ -75,24 +77,29 @@ def convert2coco_val(caption_json, img_dir):
         coco_anno = {}
         coco_anno[u'image_id'] = os.path.splitext(os.path.basename(sample['image_id']))[0]
         coco_anno[u'id'] = os.path.splitext(os.path.basename(sample['image_id']))[0]
-        coco_anno[u'caption'] = sample['caption']
-        idx = 0
-        for s in sample['caption']:
-            if len(s)==0:
-                print('error: some caption had no words?')
-                print(coco_img[u'file_name'])
-                sample['caption'][idx] = sample['caption'][idx-1]
-                print(sample['caption'])
-                #break
-            idx = idx+1
+
+        cap = sample['caption'][cap_index]
+        if len(cap) == 0:
+            cap = sample['caption'][cap_index-1]
+
+        coco_anno[u'caption'] = ' '.join(jieba.cut(cap, cut_all=False))
+        #idx = 0
+        #for s in sample['caption']:
+        #    if len(s)==0:
+        #        print('error: some caption had no words?')
+        #        print(coco_img[u'file_name'])
+        #        sample['caption'][idx] = sample['caption'][idx-1]
+        #        print(sample['caption'])
+        #        #break
+        #    idx = idx+1
         coco[u'images'].append(coco_img)
         coco[u'annotations'].append(coco_anno)
 
-        #print('{}/{}'.format(ind, len(dataset)))
+        print('{}/{}'.format(ind, len(dataset)))
 
-    output_file = os.path.join(os.path.dirname(caption_json), 'coco_'+os.path.basename(caption_json))
+    output_file = 'refs/coco_val_ref_{}.json'.format(cap_index)
     with open(output_file, 'w') as fid:
-        json.dump(coco, fid)
+        json.dump(coco, fid, ensure_ascii=False, indent=4)
     print('Saved to {}'.format(output_file))
 
 def convert2coco_eval(caption_json, img_dir):
@@ -138,9 +145,9 @@ def convert2coco_eval(caption_json, img_dir):
 
         print('{}/{}'.format(ind, len(dataset)))
 
-    output_file = os.path.join(os.path.dirname(caption_json), 'coco_val_'+os.path.basename(caption_json))
+    output_file = 'data/coco_eval.json'
     with open(output_file, 'w') as fid:
-        json.dump(coco, fid)
+        json.dump(coco, fid, ensure_ascii=False, indent=4)
     print('Saved to {}'.format(output_file))
 
 def convert2coco_test(img_dir):
@@ -172,8 +179,8 @@ def convert2coco_test(img_dir):
 def ai_challenger_preprocess():
     import os
     import json
-    val = json.load(open('data/ai_challenger/ai_challenger_caption_validation_20170910/coco_caption_validation_annotations_20170910.json', 'r'))
-    train = json.load(open('data/ai_challenger/ai_challenger_caption_train_20170902/coco_caption_train_annotations_20170902.json', 'r'))
+    val = json.load(open('data/val/caption_validation_annotations_20170910.json', 'r'))
+    train = json.load(open('data/train/caption_train_annotations_20170902.json', 'r'))
 
     print(val.keys())
     print(val['info'])
@@ -233,17 +240,18 @@ def ai_challenger_preprocess():
     json.dump(out_json, open(output_file, 'w'))
 
 if __name__ == "__main__":
-    train_caption_json = '/media/jxgu/d2ta/dataset/ai_challenger/ai_challenger_caption_train_20170902/caption_train_annotations_20170902.json'
-    train_img_dir = '/media/jxgu/d2ta/dataset/ai_challenger/ai_challenger_caption_train_20170902/caption_train_images_20170902'
-    val_caption_json = '/media/jxgu/d2ta/dataset/ai_challenger/ai_challenger_caption_validation_20170910/caption_validation_annotations_20170910.json'
-    val_img_dir = '/media/jxgu/d2ta/dataset/ai_challenger/ai_challenger_caption_validation_20170910/caption_validation_images_20170910'
-    test_img_dir = '/media/jxgu/d2ta/dataset/ai_challenger/ai_challenger_caption_test1_20170923/caption_test1_images_20170923'
+    train_caption_json = 'data/train/caption_train_annotations_20170902.json'
+    train_img_dir = 'data/train/224'
+    val_caption_json = 'data/val/caption_validation_annotations_20170910.json'
+    val_img_dir = 'data/val/224'
+    test_img_dir = 'data/test1/224'
     # Convert json (ai challenger) to coco format
-    convert2coco(train_caption_json, train_img_dir)
-    convert2coco_val(val_caption_json, val_img_dir)
+    #convert2coco(train_caption_json, train_img_dir)
+    for i in range(5):
+        convert2coco_val(val_caption_json, val_img_dir, i)
     # Create json file for testing
-    convert2coco_eval(test_img_dir)
+    #convert2coco_eval(test_img_dir)
     # Create json file for evaluation
-    convert2coco_eval(val_caption_json, val_img_dir)
+    #convert2coco_eval(val_caption_json, val_img_dir)
     # Create json file for sentence label and image feature extraction
-    ai_challenger_preprocess()
+    #ai_challenger_preprocess()

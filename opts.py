@@ -3,15 +3,15 @@ import argparse
 def parse_opt():
     parser = argparse.ArgumentParser()
     # Data input settings
-    parser.add_argument('--input_json', type=str, default='data/coco.json',
+    parser.add_argument('--input_json', type=str, default='data/ai_challenger.json',
                     help='path to the json file containing additional info and vocab')
-    parser.add_argument('--input_fc_h5', type=str, default='data/coco_ai_challenger_talk_fc.h5',
+    parser.add_argument('--input_fc_h5', type=str, default='data/ai_challenger_resnet152_fc.h5',
                     help='path to the directory containing the preprocessed fc feats')
-    parser.add_argument('--input_att_h5', type=str, default='data/coco_ai_challenger_talk_att.h5',
+    parser.add_argument('--input_att_h5', type=str, default='data/ai_challenger_resnet152_att.h5',
                     help='path to the directory containing the preprocessed att feats')
-    parser.add_argument('--input_label_h5', type=str, default='data/coco_ai_challenger_talk_label.h5',
+    parser.add_argument('--input_label_h5', type=str, default='data/ai_challenger_label.h5',
                     help='path to the h5file containing the preprocessed dataset')
-    parser.add_argument('--start_from', type=str, default=None,
+    parser.add_argument('--start_from', type=str, default= None , #'checkpoints',
                     help="""continue training from saved model at this path. Path must contain files saved by previous training process: 
                         'infos.pkl'         : configuration;
                         'checkpoint'        : paths to model file(s) (created by tf).
@@ -20,7 +20,7 @@ def parse_opt():
                     """)
 
     # Model settings
-    parser.add_argument('--caption_model', type=str, default="show_tell",
+    parser.add_argument('--caption_model', type=str, default="show_attend_tell",
                     help='show_tell, show_attend_tell, all_img, fc, att2in, att2in2, adaatt, adaattmo, topdown')
     parser.add_argument('--rnn_size', type=int, default=512,
                     help='size of the rnn in number of hidden nodes in each layer')
@@ -40,7 +40,7 @@ def parse_opt():
     # Optimization: General
     parser.add_argument('--max_epochs', type=int, default=-1,
                     help='number of epochs')
-    parser.add_argument('--batch_size', type=int, default=16,
+    parser.add_argument('--batch_size', type=int, default=256,
                     help='minibatch size')
     parser.add_argument('--grad_clip', type=float, default=0.1, #5.,
                     help='clip gradients at this value')
@@ -48,7 +48,7 @@ def parse_opt():
                     help='strength of dropout in the Language Model RNN')
     parser.add_argument('--seq_per_img', type=int, default=5,
                     help='number of captions to sample for each image during training. Done for efficiency since CNN forward pass is expensive. E.g. coco has 5 sents/image')
-    parser.add_argument('--beam_size', type=int, default=1,
+    parser.add_argument('--beam_size', type=int, default=2,
                     help='used when sample_max = 1, indicates number of beams in beam search. Usually 2 or 3 works well. More is not better. Set this to 1 for faster runtime but a bit worse performance.')
 
     #Optimization: for the Language Model
@@ -84,9 +84,9 @@ def parse_opt():
     # Evaluation/Checkpointing
     parser.add_argument('--val_images_use', type=int, default=3200,
                     help='how many images to use when periodically evaluating the validation loss? (-1 = all)')
-    parser.add_argument('--save_checkpoint_every', type=int, default=2500,
+    parser.add_argument('--save_checkpoint_every', type=int, default=1000,
                     help='how often to save a model checkpoint (in iterations)?')
-    parser.add_argument('--checkpoint_path', type=str, default='save',
+    parser.add_argument('--checkpoint_path', type=str, default='checkpoints',
                     help='directory to store checkpointed models')
     parser.add_argument('--language_eval', type=int, default=0,
                     help='Evaluate language as well (1 = yes, 0 = no)? BLEU/CIDEr/METEOR/ROUGE_L? requires coco-caption code from Github.')

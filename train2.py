@@ -12,11 +12,10 @@ import numpy as np
 import time
 import os
 from six.moves import cPickle
-import json
 
 import opts
 import models
-from dataloader import *
+from dataloader2 import *
 import eval_utils
 import misc.utils as utils
 
@@ -32,7 +31,7 @@ def add_summary_value(writer, key, value, iteration):
 
 def train(opt):
     opt.use_att = utils.if_use_att(opt.caption_model)
-    loader = DataLoader(opt)
+    loader = get_data_loader('train', batch_size=512) #DataLoader(opt)
     opt.vocab_size = loader.vocab_size
     opt.seq_length = loader.seq_length
 
@@ -40,10 +39,9 @@ def train(opt):
 
     infos = {}
     histories = {}
-    #if False:
     if opt.start_from is not None:
         # open old infos and check if models are compatible
-        with open(os.path.join(opt.start_from, 'infos_'+opt.id+'.pkl'), 'rb') as f:
+        with open(os.path.join(opt.start_from, 'infos_'+opt.id+'.pkl')) as f:
             infos = cPickle.load(f)
             saved_model_opt = infos['opt']
             need_be_same=["caption_model", "rnn_type", "rnn_size", "num_layers"]
@@ -51,7 +49,7 @@ def train(opt):
                 assert vars(saved_model_opt)[checkme] == vars(opt)[checkme], "Command line argument and saved model disagree on '%s' " % checkme
 
         if os.path.isfile(os.path.join(opt.start_from, 'histories_'+opt.id+'.pkl')):
-            with open(os.path.join(opt.start_from, 'histories_'+opt.id+'.pkl'), 'rb') as f:
+            with open(os.path.join(opt.start_from, 'histories_'+opt.id+'.pkl')) as f:
                 histories = cPickle.load(f)
 
     iteration = infos.get('iter', 0)
@@ -62,8 +60,8 @@ def train(opt):
     lr_history = histories.get('lr_history', {})
     ss_prob_history = histories.get('ss_prob_history', {})
 
-    loader.iterators = infos.get('iterators', loader.iterators)
-    loader.split_ix = infos.get('split_ix', loader.split_ix)
+    #loader.iterators = infos.get('iterators', loader.iterators)
+    #loader.split_ix = infos.get('split_ix', loader.split_ix)
     if opt.load_best_score == 1:
         best_val_score = infos.get('best_val_score', None)
 
@@ -75,21 +73,17 @@ def train(opt):
     model.train()
 
     crit = utils.LanguageModelCriterion()
-    print('learning rate: {}'.format(opt.learning_rate))
 
     optimizer = optim.Adam(model.parameters(), lr=opt.learning_rate, weight_decay=opt.weight_decay)
 
     # Load the optimizer
     if vars(opt).get('start_from', None) is not None:
         optimizer.load_state_dict(torch.load(os.path.join(opt.start_from, 'optimizer.pth')))
-        model.load_state_dict(torch.load(os.path.join(opt.start_from, 'model.pth')))
-        print('Loaded: {}'.format(os.path.join(opt.start_from, 'model.pth')))
 
-    N = loader.num_images
-    print('N:', N)
+    #while True:
+    N = loader.N
     num_samples = 0
-
-    while True:
+    for data in loader:
         if update_lr_flag:
                 # Assign the learning rate
             if epoch > opt.learning_rate_decay_start and opt.learning_rate_decay_start >= 0:
@@ -108,36 +102,44 @@ def train(opt):
                 
         start = time.time()
         # Load data from train split (0)
-        data = loader.get_batch('train')
+        #data = loader.get_batch('train')
         #print('Read data:', time.time() - start)
-        read_data_time = time.time() - start
 
         torch.cuda.synchronize()
         start = time.time()
 
-        tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks']]
-        tmp = [Variable(torch.from_numpy(_), requires_grad=False).cuda() for _ in tmp]
-        fc_feats, att_feats, labels, masks = tmp
+        #tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks']]
+        #tmp = [Variable(torch.from_numpy(_), requires_grad=False).cuda() for _ in tmp]
+        #att_feats, fc_feats, labels, masks = data
+        #att_feats, fc_feats, labels, masks = Variable(att_feats).cuda(), Variable(fc_feats).cuda(), Variable(labels.cuda(), Variable(masks).cuda()
+        #print(type(data[0]),type(data[1]), type(data[2]), type(data[3]) )
+        att_feats, fc_feats, labels, masks = [Variable(_, requires_grad=False).cuda() for _ in data] 
+        num_samples += att_feats.size()[0]
 
-        num_samples += data['fc_feats'].shape[0]
+        
+        #print(fc_feats.size(), att_feats.size(), labels.size(), masks.size())
+        #print(type(fc_feats), type(att_feats), type(labels), type(masks))
+        output = model(fc_feats, att_feats, labels)
         
         optimizer.zero_grad()
-        #print(fc_feats.size(), att_feats.size(), labels.size(), masks.size())
-        loss = crit(model(fc_feats, att_feats, labels), labels[:,1:], masks[:,1:])
+        loss = crit(output, labels[:,1:], masks[:,1:])
         loss.backward()
+        
         utils.clip_gradient(optimizer, opt.grad_clip)
         optimizer.step()
+        
         train_loss = loss.data[0]
         torch.cuda.synchronize()
+        
         end = time.time()
-        print("iter {} (epoch {}), %{:.3f}, train_loss = {:.3f}, time/batch = {:.3f}, read_data = {:.3f}" \
-            .format(iteration, epoch, num_samples*100/N, train_loss, end - start, read_data_time))
+        print("iter {} (epoch {}), {:.2f}, train_loss = {:.3f}, time/batch = {:.3f}" \
+            .format(iteration, epoch, num_samples/N, train_loss, end - start))
 
         # Update the iteration and epoch
         iteration += 1
-        if data['bounds']['wrapped']:
-            epoch += 1
-            update_lr_flag = True
+        #if data['bounds']['wrapped']:
+        #    epoch += 1
+        #    update_lr_flag = True
 
         # Write the training loss summary
         if (iteration % opt.losses_log_every == 0):
@@ -160,7 +162,7 @@ def train(opt):
             val_loss, predictions, lang_stats = eval_utils.eval_split(model, crit, loader, eval_kwargs)
 
             # Write validation result into summary
-            if False: #tf is not None:
+            if tf is not None:
                 add_summary_value(tf_summary_writer, 'validation loss', val_loss, iteration)
                 for k,v in lang_stats.items():
                     add_summary_value(tf_summary_writer, k, v, iteration)
@@ -214,9 +216,4 @@ def train(opt):
             break
 
 opt = opts.parse_opt()
-
-params = vars(opt)  # convert to ordinary dict
-print('parsed input parameters:')
-print(json.dumps(params, indent=4))
-
 train(opt)

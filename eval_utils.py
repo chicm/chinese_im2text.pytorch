@@ -16,7 +16,7 @@ import os
 import sys
 import misc.utils as utils
 
-def language_eval_chinese(dataset, preds, model_id, split):
+def language_eval_chinese(preds, ref_file='refs/coco_val_ref_1.json'):
     from caption_eval.coco_caption.pycxtools.coco import COCO
     from caption_eval.coco_caption.pycxevalcap.eval import COCOEvalCap
     m1_score = {}
@@ -26,15 +26,14 @@ def language_eval_chinese(dataset, preds, model_id, split):
 
     if not os.path.isdir('eval_results'):
         os.mkdir('eval_results')
-    cache_path = os.path.join('eval_results/', model_id + '_' + split + '.json')
-    reference_file = 'caption_eval/data/coco_val_caption_validation_annotations_20170910.json'
-    coco = COCO(reference_file)
+    cache_path = os.path.join('eval_results/tmp_preds.json')
+    coco = COCO(ref_file)
     valids = coco.getImgIds()
 
     # filter results to only those in MSCOCO validation set (will be about a third)
     preds_filt = [p for p in preds if p['image_id'] in valids]
     print('using %d/%d predictions' % (len(preds_filt), len(preds)))
-    json.dump(preds_filt, open(cache_path, 'w')) # serialize to temporary json file. Sigh, COCO API...
+    json.dump(preds_filt, open(cache_path, 'w'), ensure_ascii=False, indent=4) # serialize to temporary json file. Sigh, COCO API...
 
     coco_res = coco.loadRes(cache_path)
     coco_eval = COCOEvalCap(coco, coco_res)
@@ -128,8 +127,8 @@ def eval_split(model, crit, loader, eval_kwargs={}):
 
         # forward the model to also get generated samples for each image
         # Only leave one feature for each image, in case duplicate sample
-        tmp = [data['fc_feats'][np.arange(loader.batch_size) * loader.seq_per_img], 
-            data['att_feats'][np.arange(loader.batch_size) * loader.seq_per_img]]
+        tmp = [data['fc_feats'][np.arange(loader.batch_size)], #* loader.seq_per_img], 
+            data['att_feats'][np.arange(loader.batch_size)]] # * loader.seq_per_img]]
         tmp = [Variable(torch.from_numpy(_), volatile=True).cuda() for _ in tmp]
         fc_feats, att_feats = tmp
         # forward the model to also get generated samples for each image
@@ -170,8 +169,16 @@ def eval_split(model, crit, loader, eval_kwargs={}):
 
     lang_stats = None
     if lang_eval == 1:
-        lang_stats = language_eval_chinese(dataset, predictions, eval_kwargs['id'], split)
+        lang_stats = language_eval_chinese(predictions)
 
     # Switch back to training mode
     model.train()
     return loss_sum/loss_evals, predictions, lang_stats
+
+
+def test_language_eval():
+    preds = json.load(open('results/1103/val_out_best_model.json', 'r'))
+    language_eval_chinese(preds)
+
+if __name__ == '__main__':
+    test_language_eval()

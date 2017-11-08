@@ -9,7 +9,8 @@ class myResnet(nn.Module):
         self.resnet = resnet
 
     def forward(self, img, att_size=14):
-        x = img.unsqueeze(0)
+        #x = img.unsqueeze(0)
+        x = img
 
         x = self.resnet.conv1(x)
         x = self.resnet.bn1(x)
@@ -22,7 +23,9 @@ class myResnet(nn.Module):
         x = self.resnet.layer4(x)
 
         fc = x.mean(3).mean(2).squeeze()
-        att = F.adaptive_avg_pool2d(x,[att_size,att_size]).squeeze().permute(1, 2, 0)
+        #att = F.adaptive_avg_pool2d(x,[att_size,att_size]).squeeze().permute(1, 2, 0)
+        #print(x.data.size())
+        att = F.adaptive_avg_pool2d(x,[att_size,att_size]).squeeze().permute(0,2,3,1)
         
         return fc, att
 
